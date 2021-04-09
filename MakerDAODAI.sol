@@ -110,66 +110,42 @@ interface Abacus {
 }
 
 contract LinearDecrease is Abacus, Auth {
-    using SafeMath for uint;
     uint public tau;  // seconds to reach price zero after auction start
     event File(bytes32 indexed what, uint data);
-
     constructor() {
         wards[msg.sender] = 1;
         emit Rely(msg.sender);
     }
-
     function file(bytes32 what, uint data) external auth {
         if (what ==  "tau") tau = data;
         else revert("LinearDecrease/file-unrecognized-param");
         emit File(what, data);
     }
-
     function price(uint top, uint dur) override external view returns (uint) {
         if (dur >= tau) return 0;
         return SafeMath.rmul(top, SafeMath.mul(tau - dur, RAY) / tau);
     }
 }
 
-contract StairstepExponentialDecrease is Abacus, Auth {
-    uint public step; // Length of time between price drops [seconds]
-    uint public cut;  // Per-step multiplicative factor     [ray]
-    event File(bytes32 indexed what, uint data);
-    constructor() {
-        wards[msg.sender] = 1;
-        emit Rely(msg.sender);
-    }
-    function file(bytes32 what, uint data) external auth {
-        if      (what ==  "cut") require((cut = data) <= RAY, "StairstepExponentialDecrease/cut-gt-RAY");
-        else if (what == "step") step = data;
-        else revert("StairstepExponentialDecrease/file-unrecognized-param");
-        emit File(what, data);
-    }    
-    // step: seconds between a price drop
-    // cut: cut encodes the percentage to decrease per step.
-    // for a 1% decrease per step, cut would be (1 - 0.01) * RAY
-    // returns: top * (cut ** dur)
-    function price(uint top, uint dur) override external view returns (uint) {
-        return SafeMath.rmul(top, Math.rpow(cut, dur / step, RAY));
-    }
-}
-
-// more gas-efficient than using stairstep with step = 1 (1 fewer SLOAD per calculation).
-contract ExponentialDecrease is Abacus, Auth {
+contract ExponentialDecrease is Abacus, Auth {//combined with StairstepExponentialDecrease
+    uint public step = 1; // Length of time between price drops [seconds]
     uint public cut;  // Per-second multiplicative factor [ray]
     event File(bytes32 indexed what, uint data);
-
     constructor() {
         wards[msg.sender] = 1;
         emit Rely(msg.sender);
     }
     function file(bytes32 what, uint data) external auth {
         if      (what ==  "cut") require((cut = data) <= RAY, "ExponentialDecrease/cut-gt-RAY");
+        else if (what == "step") step = data;
         else revert("ExponentialDecrease/file-unrecognized-param");
         emit File(what, data);
-    }
+    }   
+    // cut: cut encodes the percentage to decrease per step.
+    // for a 1% decrease per step, cut would be (1 - 0.01) * RAY
+    // returns: top * (cut ** dur)
     function price(uint top, uint dur) override external view returns (uint) {
-        return SafeMath.rmul(top, Math.rpow(cut, dur, RAY)); // top * (cut ** dur)
+        return SafeMath.rmul(top, Math.rpow(cut, dur / step, RAY)); // top * (cut ** dur)
     }
 }
 
