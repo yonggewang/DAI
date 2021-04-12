@@ -1,7 +1,7 @@
 //SPDX-License-Identifier: TBD
 pragma solidity =0.7.4;
 
-contract Auth {
+contract BASE {
     event Rely(address indexed usr);
     event Deny(address indexed usr);
     uint constant RAY = 10 ** 27;
@@ -12,6 +12,10 @@ contract Auth {
     modifier auth {
         require(wards[msg.sender] == 1, "LinearDecrease/not-authorized");
         _;
+    }
+    constructor() {
+        wards[msg.sender] = 1;
+        emit Rely(msg.sender);
     }
 }
 interface CatLike {
@@ -109,13 +113,9 @@ interface Abacus {
     function price(uint top, uint dur) external view returns (uint);
 }
 
-contract LinearDecrease is Abacus, Auth {
+contract LinearDecrease is Abacus, BASE {
     uint public tau;  // seconds to reach price zero after auction start
     event File(bytes32 indexed what, uint data);
-    constructor() {
-        wards[msg.sender] = 1;
-        emit Rely(msg.sender);
-    }
     function file(bytes32 what, uint data) external auth {
         if (what ==  "tau") tau = data;
         else revert("LinearDecrease/file-unrecognized-param");
@@ -127,16 +127,12 @@ contract LinearDecrease is Abacus, Auth {
     }
 }
 
-contract ExponentialDecrease is Abacus, Auth {//combined with StairstepExponentialDecrease
+contract ExponentialDecrease is Abacus, BASE {//combined with StairstepExponentialDecrease
     uint public step = 1; // Length of time between price drops [seconds]
     uint public cut;  // Per-second multiplicative factor [ray]
     event File(bytes32 indexed what, uint data);
-    constructor() {
-        wards[msg.sender] = 1;
-        emit Rely(msg.sender);
-    }
     function file(bytes32 what, uint data) external auth {
-        if      (what ==  "cut") require((cut = data) <= RAY, "ExponentialDecrease/cut-gt-RAY");
+        if (what ==  "cut") require((cut = data) <= RAY, "ExponentialDecrease/cut-gt-RAY");
         else if (what == "step") step = data;
         else revert("ExponentialDecrease/file-unrecognized-param");
         emit File(what, data);
@@ -149,16 +145,14 @@ contract ExponentialDecrease is Abacus, Auth {//combined with StairstepExponenti
     }
 }
 
-contract Cat is Auth {
+contract Cat is BASE {
     struct Ilk {
         address flip;  // Liquidator
         uint chop;  // Liquidation Penalty  [wad]
         uint dunk;  // Liquidation Quantity [rad]
     }
-
     mapping (bytes32 => Ilk) public ilks;
-
-    uint public live;   
+    uint public live = 1;   
     VatLike public vat;  
     VowLike public vow;    // Debt Engine
     uint public box;    // Max Dai out for liquidation    [rad]
@@ -166,9 +160,7 @@ contract Cat is Auth {
     event Bite(bytes32 indexed,address indexed,uint,uint,uint,address,uint);
 
     constructor(address vat_) {
-        wards[msg.sender] = 1;
         vat = VatLike(vat_);
-        live = 1;
     }
     function file(bytes32 what, address data) external auth {
         if (what == "vow") vow = VowLike(data);
@@ -241,22 +233,22 @@ contract Cat is Auth {
     }
 }
 
-contract Clipper is Auth {
+contract Clipper is BASE {
     bytes32  immutable public ilk;   // Collateral type of this Clipper
     VatLike  immutable public vat;   // Core CDP Engine
     uint constant BLN = 10 **  9;
 
-    DogLike     public dog;      // Liquidation module
-    address     public vow;      // Recipient of dai raised in auctions
+    DogLike     public dog;    // Liquidation module
+    address     public vow;    // Recipient of dai raised in auctions
     SpotLike public spotter;  // Collateral price module
-    AbacusLike  public calc;     // Current price calculator
+    AbacusLike  public calc;  // Current price calculator
 
-    uint public buf;    // Multiplicative factor to increase starting price                  [ray]
-    uint public tail;   // Time elapsed before auction reset                                 [seconds]
-    uint public cusp;   // Percentage drop before auction reset                              [ray]
-    uint64  public chip;   // Percentage of tab to suck from vow to incentivize keepers         [wad]
-    uint192 public tip;    // Flat fee to suck from vow to incentivize keepers                  [rad]
-    uint public chost;  // Cache the ilk dust times the ilk chop to prevent excessive SLOADs [rad]
+    uint public buf = RAY; // Multiplicative factor to increase starting price 
+    uint public tail; // Time elapsed before auction reset  [seconds]
+    uint public cusp; // % drop before auction reset     [ray]
+    uint64  public chip; // % of tab to suck from vow to incentivize keepers (max: 2^64 - 1 => 18.xxx WAD = 18xx%)
+    uint192 public tip;  // Flat fee to suck from vow to incentivize keepers   (max: 2^192 - 1 => 6.277T RAD)
+    uint public chost;// Cache ilk dust times ilk chop to prevent excessive SLOADs [rad]
 
     uint   public kicks;   // Total auctions
     uint[] public active;  // Array of active auction ids
@@ -291,9 +283,6 @@ contract Clipper is Auth {
         spotter = SpotLike(spotter_);
         dog     = DogLike(dog_);
         ilk     = ilk_;
-        buf     = RAY;
-        wards[msg.sender] = 1;
-        emit Rely(msg.sender);
     }
 
     modifier lock {
@@ -310,11 +299,11 @@ contract Clipper is Auth {
 
     function file(bytes32 what, uint data) external auth lock {
         if      (what == "buf")         buf = data;
-        else if (what == "tail")       tail = data;           // Time elapsed before auction reset
-        else if (what == "cusp")       cusp = data;           // Percentage drop before auction reset
-        else if (what == "chip")       chip = uint64(data);   // Percentage of tab to incentivize (max: 2^64 - 1 => 18.xxx WAD = 18xx%)
-        else if (what == "tip")         tip = uint192(data);  // Flat fee to incentivize keepers (max: 2^192 - 1 => 6.277T RAD)
-        else if (what == "stopped") stopped = data;           // Set breaker (0, 1, 2, or 3)
+        else if (what == "tail")       tail = data;       
+        else if (what == "cusp")       cusp = data;        
+        else if (what == "chip")       chip = uint64(data);  
+        else if (what == "tip")         tip = uint192(data); 
+        else if (what == "stopped") stopped = data;  //Set breaker (0, 1, 2, or 3)
         else revert("Clipper/file-unrecognized-param");
         emit File(what, data);
     }
@@ -327,7 +316,6 @@ contract Clipper is Auth {
         emit File(what, data);
     }
 
-    // get the price directly from the OSM
     // Could get this from rmul(Vat.ilks(ilk).spot, Spotter.mat()) instead, but
     // if mat has changed since last poke, the resulting value will be incorrect.
     function getFeedPrice() internal returns (uint feedPrice) {
@@ -426,18 +414,18 @@ contract Clipper is Auth {
     // 
     // Auctions will not collect more DAI than their assigned DAI target,`tab`;
     // thus, if `amt` would cost more DAI than `tab` at the current price, the
-    // amount of collateral purchased will instead be just enough to collect `tab` DAI.
+    // amount of collateral purchased will instead be enough to collect `tab` DAI.
     //
     // To avoid partial purchases resulting in very small leftover auctions that will
     // never be cleared, any partial purchase must leave at least `Clipper.chost`
     // remaining DAI target. `chost` is an asynchronously updated value equal to
-    // (Vat.dust * Dog.chop(ilk) / WAD) where the values are understood to be determined
+    // (Vat.dust * Dog.chop(ilk)/WAD) where values are understood to be determined
     // by whatever they were when Clipper.upchost() was last called. Purchase amounts
     // will be minimally decreased when necessary to respect this limit; i.e., if the
     // specified `amt` would leave `tab < chost` but `tab > 0`, the amount actually
     // purchased will be such that `tab == chost`.
     //
-    // If `tab <= chost`, partial purchases are no longer possible; that is, the remaining
+    // If `tab <= chost`, partial purchases are no longer possible; i.e, the remaining
     // collateral can only be purchased entirely, or not at all.
     function take(
         uint id,           // Auction id
@@ -477,7 +465,6 @@ contract Clipper is Auth {
                     slice = owe / price;     // slice' = owe' / price < owe / price == slice < lot
                 }
             }
-
             tab = tab - owe;  // safe since owe <= tab
             lot = lot - slice;
             vat.flux(ilk, address(this), who, slice);
@@ -489,7 +476,6 @@ contract Clipper is Auth {
             vat.move(msg.sender, vow, owe);
             dog_.digs(ilk, lot == 0 ? tab + owe : owe);
         }
-
         if (lot == 0) {
             _remove(id);
         } else if (tab == 0) {
@@ -499,10 +485,8 @@ contract Clipper is Auth {
             sales[id].tab = tab;
             sales[id].lot = lot;
         }
-
         emit Take(id, max, price, owe, tab, lot, usr);
     }
-
     function _remove(uint id) internal {
         uint _move    = active[active.length - 1];
         if (id != _move) {
@@ -513,16 +497,13 @@ contract Clipper is Auth {
         active.pop();
         delete sales[id];
     }
-
     function count() external view returns (uint) {
         return active.length;
     }
-
     function list() external view returns (uint[] memory) {
         return active;
     }
 
-    // Externally returns boolean for if an auction needs a redo and also the current price
     function getStatus(uint id) external view returns (bool needsRedo, uint price, uint lot, uint tab) {
         address usr = sales[id].usr;
         uint96  tic = sales[id].tic;
@@ -557,7 +538,7 @@ contract Clipper is Auth {
     }
 }
 
-contract Dai is Auth {
+contract Dai is BASE {
     string  public constant name     = "Dai Stablecoin";
     string  public constant symbol   = "DAI";
     string  public constant version  = "1";
@@ -575,7 +556,6 @@ contract Dai is Auth {
     bytes32 public constant PERMIT_TYPEHASH = 0xea2aa0a1be11a07ed86d755c93467f4f82362b452371d1ba94d1715123511acb;
 
     constructor(uint chainId_) {
-        wards[msg.sender] = 1;
         DOMAIN_SEPARATOR = keccak256(abi.encode(
             keccak256("EIP712Domain(string name,string version,uint chainId,address verifyingContract)"),
             keccak256(bytes(name)),keccak256(bytes(version)),chainId_,address(this) ));
@@ -643,21 +623,21 @@ contract Dai is Auth {
     }
 }
 
-contract Dog is Auth {
+contract Dog is BASE {
     struct Ilk {
         address clip;  // Liquidator
-        uint chop;  // Liquidation Penalty                                          [wad]
-        uint hole;  // Max DAI needed to cover debt+fees of active auctions per ilk [rad]
-        uint dirt;  // Amt DAI needed to cover debt+fees of active auctions per ilk [rad]
+        uint chop;  // Liquidation Penalty                            [wad]
+        uint hole;  // Max DAI to cover debt+fees of auctions per ilk [rad]
+        uint dirt;  // Amt DAI to cover debt+fees of auctions per ilk [rad]
     }
 
     VatLike immutable public vat; 
     mapping (bytes32 => Ilk) public ilks;
 
     VowLike public vow;   // Debt Engine
-    uint public live;  // Active Flag
-    uint public Hole;  // Max DAI needed to cover debt+fees of active auctions [rad]
-    uint public Dirt;  // Amt DAI needed to cover debt+fees of active auctions [rad]
+    uint public live = 1;  // Active Flag
+    uint public Hole;  // Max DAI to cover debt+fees of active auctions [rad]
+    uint public Dirt;  // Amt DAI to cover debt+fees of active auctions [rad]
     event File(bytes32 indexed what, uint data);
     event File(bytes32 indexed what, address data);
     event File(bytes32 indexed ilk, bytes32 indexed what, uint data);
@@ -668,9 +648,6 @@ contract Dog is Auth {
 
     constructor(address vat_) {
         vat = VatLike(vat_);
-        live = 1;
-        wards[msg.sender] = 1;
-        emit Rely(msg.sender);
     }
 
     function file(bytes32 what, address data) external auth {
@@ -785,102 +762,7 @@ contract Dog is Auth {
     }
 }
 
-/*  First we freeze the system and lock the prices for each ilk.
-    1. `cage()`:
-        - freezes user entrypoints
-        - cancels flop/flap auctions
-        - starts cooldown period
-        - stops pot drips
-    2. `cage(ilk)`:
-       - set the cage price for each `ilk`, reading off the price feed
-    we need to determine
-      a. `gap`, the collateral shortfall per collateral type by
-         considering under-collateralised CDPs.
-      b. `debt`, the outstanding dai supply after including system
-         surplus / deficit
-    We determine (a) by processing all under-collateralised CDPs with `skim`:
-    3. `skim(ilk, urn)`:
-       - cancels CDP debt
-       - any excess collateral remains
-       - backing collateral taken
-    We determine (b) by processing ongoing dai generating processes,
-    i.e. auctions. We need to ensure that auctions will not generate any
-    further dai income.
-    In the two-way auction model (Flipper) this occurs when
-    all auctions are in the reverse (`dent`) phase. There are two ways
-    of ensuring this:
-    4a. i) `wait`: set the cooldown period to be at least as long as the
-           longest auction duration, which needs to be determined by the
-           cage administrator.
-
-           This takes a fairly predictable time to occur but with altered
-           auction dynamics due to the now varying price of dai.
-       ii) `skip`: cancel all ongoing auctions and seize the collateral.
-           This allows for faster processing at the expense of more
-           processing calls. This option allows dai holders to retrieve
-           their collateral faster.
-           `skip(ilk, id)`:
-            - cancel individual flip auctions in the `tend` (forward) phase
-            - retrieves collateral and debt (including penalty) to owner's CDP
-            - returns dai to last bidder
-            - `dent` (reverse) phase auctions can continue normally
-
-    Option (i), `wait`, is sufficient (if all auctions were bidded at least
-    once) for processing the system settlement but option (ii), `skip`,
-    will speed it up. Both options are available in this implementation,
-    with `skip` being enabled on a per-auction basis.
-
-    In the case of the Dutch Auctions model (Clipper) they keep recovering
-    debt during the whole lifetime and there isn't a max duration time
-    guaranteed for the auction to end.
-    So the way to ensure the protocol will not receive extra dai income is:
-
-    4b. i) `snip`: cancel all ongoing auctions and seize the collateral.
-           `snip(ilk, id)`:
-            - cancel individual running clip auctions
-            - retrieves remaining collateral and debt (including penalty)
-              to owner's CDP
-
-    When a CDP has been processed and has no debt remaining, the
-    remaining collateral can be removed.
-
-    5. `free(ilk)`:
-        - remove collateral from the caller's CDP
-        - owner can call as needed
-
-    After the processing period has elapsed, we enable calculation of
-    the final price for each collateral type.
-
-    6. `thaw()`:
-       - only callable after processing time period elapsed
-       - assumption that all under-collateralised CDPs are processed
-       - fixes the total outstanding supply of dai
-       - may also require extra CDP processing to cover vow surplus
-
-    7. `flow(ilk)`:
-        - calculate the `fix`, the cash price for a given ilk
-        - adjusts the `fix` in the case of deficit / surplus
-
-    At this point we have computed the final price for each collateral
-    type and dai holders can now turn their dai into collateral. Each
-    unit dai can claim a fixed basket of collateral.
-
-    Dai holders must first `pack` some dai into a `bag`. Once packed,
-    dai cannot be unpacked and is not transferrable. More dai can be
-    added to a bag later.
-
-    8. `pack(wad)`:
-        - put some dai into a bag in preparation for `cash`
-
-    Finally, collateral can be obtained with `cash`. The bigger the bag,
-    the more collateral can be released.
-
-    9. `cash(ilk, wad)`:
-        - exchange some dai from your bag for gems from a specific ilk
-        - the number of gems is limited by how big your bag is
-*/
-
-contract End is Auth {
+contract End is BASE {
     VatLike  public vat;   // CDP Engine
     CatLike  public cat;
     DogLike  public dog;
@@ -888,7 +770,7 @@ contract End is Auth {
     PotLike  public pot;
     SpotLike public spot;
 
-    uint  public live;  // Active Flag
+    uint  public live = 1;  // Active Flag
     uint  public when;  // Time of cage                   [unix epoch time]
     uint  public wait;  // Processing Cooldown Length             [seconds]
     uint  public debt;  // Total outstanding dai following processing [rad]
@@ -911,12 +793,6 @@ contract End is Auth {
     event Flow(bytes32 indexed ilk);
     event Pack(address indexed usr, uint wad);
     event Cash(bytes32 indexed ilk, address indexed usr, uint wad);
-
-    constructor() {
-        wards[msg.sender] = 1;
-        live = 1;
-        emit Rely(msg.sender);
-    }
 
     function file(bytes32 what, address data) external auth {
         require(live == 1, "End/not-live");
@@ -1053,7 +929,7 @@ contract End is Auth {
     }
 }
 
-contract Flapper is Auth {
+contract Flapper is BASE {
     struct Bid {
         uint bid;  // gems paid               [wad]
         uint lot;  // dai in return for bid   [rad]
@@ -1071,15 +947,13 @@ contract Flapper is Auth {
     uint48   public   ttl = 3 hours;  // single bid lifetime 
     uint48   public   tau = 2 days;   // 2 days total auction length 
     uint  public kicks = 0;
-    uint  public live;  
+    uint  public live = 1;  
 
     event Kick(uint,uint,uint);
 
     constructor(address vat_, address gem_) {
-        wards[msg.sender] = 1;
         vat = VatLike(vat_);
         gem = GemLike(gem_);
-        live = 1;
     }
 
     function file(bytes32 what, uint data) external auth {
@@ -1089,10 +963,8 @@ contract Flapper is Auth {
         else revert("Flapper/file-unrecognized-param");
     }
 
-    // --- Auction ---
     function kick(uint lot, uint bid) external auth returns (uint id) {
         require(live == 1, "Flapper/not-live");
-        require(kicks < uint(-1), "Flapper/overflow");
         id = ++kicks;
 
         bids[id].bid = bid;
@@ -1147,7 +1019,7 @@ contract Flapper is Auth {
     }
 }
 
-contract Flipper is Auth {
+contract Flipper is BASE {
     struct Bid {
         uint bid;  // dai paid                 [rad]
         uint lot;  // gems in return for bid   [wad]
@@ -1175,7 +1047,6 @@ contract Flipper is Auth {
         vat = VatLike(vat_);
         cat = CatLike(cat_);
         ilk = ilk_;
-        wards[msg.sender] = 1;
     }
 
     function file(bytes32 what, uint data) external auth {
@@ -1190,11 +1061,8 @@ contract Flipper is Auth {
     }
 
     function kick(address usr, address gal, uint tab, uint lot, uint bid)
-        public auth returns (uint id)
-    {
-        require(kicks < uint(-1), "Flipper/overflow");
+            public auth returns (uint id) {
         id = ++kicks;
-
         bids[id].bid = bid;
         bids[id].lot = lot;
         bids[id].guy = msg.sender;  // configurable??
@@ -1267,7 +1135,7 @@ contract Flipper is Auth {
     }
 }
 
-contract Flopper is Auth {
+contract Flopper is BASE {
     struct Bid {
         uint bid;  // dai paid                [rad]
         uint lot;  // gems in return for bid  [wad]
@@ -1285,15 +1153,13 @@ contract Flopper is Auth {
     uint48   public   ttl = 3 hours;  // single bid lifetime
     uint48   public   tau = 2 days;   // 2 days total auction length  [seconds]
     uint  public kicks = 0;
-    uint  public live;             // Active Flag
+    uint  public live = 1;             // Active Flag
     address  public vow;              // not used until shutdown
 
     event Kick(uint,uint,uint,address indexed);
     constructor(address vat_, address gem_) {
-        wards[msg.sender] = 1;
         vat = VatLike(vat_);
         gem = GemLike(gem_);
-        live = 1;
     }
 
     function file(bytes32 what, uint data) external auth {
@@ -1306,9 +1172,7 @@ contract Flopper is Auth {
 
     function kick(address gal, uint lot, uint bid) external auth returns (uint id) {
         require(live == 1, "Flopper/not-live");
-        require(kicks < uint(-1), "Flopper/overflow");
         id = ++kicks;
-
         bids[id].bid = bid;
         bids[id].lot = lot;
         bids[id].guy = gal;
@@ -1365,16 +1229,14 @@ contract Flopper is Auth {
     }
 }
 
-contract GemJoin is Auth {
+contract GemJoin is BASE {
     VatLike public vat;   // CDP Engine
     bytes32 public ilk;   // Collateral Type
     GemLike public gem;
     uint    public dec;
-    uint    public live;  // Active Flag
+    uint    public live = 1;  
 
     constructor(address vat_, bytes32 ilk_, address gem_) {
-        wards[msg.sender] = 1;
-        live = 1;
         vat = VatLike(vat_);
         ilk = ilk_;
         gem = GemLike(gem_);
@@ -1396,35 +1258,30 @@ contract GemJoin is Auth {
     }
 }
 
-contract DaiJoin is Auth {
+contract DaiJoin is BASE {
     VatLike public vat;      // CDP Engine
     DSTokenLike public dai;  // Stablecoin Token
-    uint    public live;     // Active Flag
+    uint    public live = 1;    
 
     constructor(address vat_, address dai_) {
-        wards[msg.sender] = 1;
-        live = 1;
         vat = VatLike(vat_);
         dai = DSTokenLike(dai_);
     }
     function cage() external auth {
         live = 0;
     }
-    function mul(uint x, uint y) internal pure returns (uint z) {
-        require(y == 0 || (z = x * y) / y == x);
-    }
     function join(address usr, uint wad) external {
-        vat.move(address(this), usr, mul(RAY, wad));
+        vat.move(address(this), usr, SafeMath.mul(RAY, wad));
         dai.burn(msg.sender, wad);
     }
     function exit(address usr, uint wad) external {
         require(live == 1, "DaiJoin/not-live");
-        vat.move(msg.sender, address(this), mul(RAY, wad));
+        vat.move(msg.sender, address(this), SafeMath.mul(RAY, wad));
         dai.mint(usr, wad);
     }
 }
 
-contract Jug is Auth {
+contract Jug is BASE {
     struct Ilk {
         uint duty;  // Collateral-specific, per-second stability fee contribution [ray]
         uint  rho;  // Time of last drip [unix epoch time]
@@ -1436,7 +1293,6 @@ contract Jug is Auth {
     uint                  public base;  // Global, per-second stability fee contribution [ray]
 
     constructor(address vat_) {
-        wards[msg.sender] = 1;
         vat = VatLike(vat_);
     }
 
@@ -1470,7 +1326,7 @@ contract Jug is Auth {
     }
 }
 
-contract Pot is Auth {
+contract Pot is BASE {
     mapping (address => uint) public pie;  // user balance of Savings Dai
 
     uint public Pie;   // Total Normalised Savings Dai  [wad]
@@ -1479,16 +1335,14 @@ contract Pot is Auth {
     VatLike public vat;   // CDP Engine
     address public vow;   // Debt Engine
     uint public rho;   // Time of last drip     [unix epoch time]
-    uint public live;  // Active Flag
+    uint public live = 1;  // Active Flag
 
     // --- Init ---
     constructor(address vat_) {
-        wards[msg.sender] = 1;
         vat = VatLike(vat_);
         dsr = RAY;
         chi = RAY;
         rho = block.timestamp;
-        live = 1;
     }
 
     function file(bytes32 what, uint data) external auth {
@@ -1533,7 +1387,7 @@ contract Pot is Auth {
     }
 }
 
-contract Spotter is Auth {
+contract Spotter is BASE {
     struct Ilk {
         PipLike pip;  // Price Feed
         uint mat;  // Liquidation ratio [ray]
@@ -1541,15 +1395,12 @@ contract Spotter is Auth {
 
     mapping (bytes32 => Ilk) public ilks;
     VatLike public vat;  // CDP Engine
-    uint public par;  // ref per dai [ray]
-    uint public live;
+    uint public par = RAY;  // ref per dai [ray]
+    uint public live = 1;
     event Poke(bytes32,bytes32, uint);
 
     constructor(address vat_) {
-        wards[msg.sender] = 1;
         vat = VatLike(vat_);
-        par = RAY;
-        live = 1;
     }
 
     function file(bytes32 ilk, bytes32 what, address pip_) external auth {
@@ -1581,7 +1432,7 @@ contract Spotter is Auth {
     }
 }
 
-contract Vat is Auth {
+contract Vat is BASE {
     mapping(address => mapping (address => uint)) public can;
     function hope(address usr) external { can[msg.sender][usr] = 1; }
     function nope(address usr) external { can[msg.sender][usr] = 0; }
@@ -1589,7 +1440,6 @@ contract Vat is Auth {
         return either(bit == usr, can[bit][usr] == 1);
     }
 
-    // --- Data ---
     struct Ilk {
         uint Art;   // Total Normalised Debt     [wad]
         uint rate;  // Accumulated Rates         [ray]
@@ -1601,6 +1451,7 @@ contract Vat is Auth {
         uint ink;   // Locked Collateral  [wad]
         uint art;   // Normalised Debt    [wad]
     }
+    //TO BE SAFE, needs: art * rate <= spot * ink  
 
     mapping (bytes32 => Ilk)                       public ilks;
     mapping (bytes32 => mapping (address => Urn )) public urns;
@@ -1611,12 +1462,8 @@ contract Vat is Auth {
     uint public debt;  // Total Dai Issued    [rad]
     uint public vice;  // Total Unbacked Dai  [rad]
     uint public Line;  // Total Debt Ceiling  [rad]
-    uint public live;  // Active Flag
+    uint public live = 1;  // Active Flag
 
-    constructor() {
-        wards[msg.sender] = 1;
-        live = 1;
-    }
     function init(bytes32 ilk) external auth {
         require(ilks[ilk].rate == 0, "Vat/ilk-already-init");
         ilks[ilk].rate = 10 ** 27;
@@ -1637,7 +1484,6 @@ contract Vat is Auth {
         live = 0;
     }
 
-    // --- Fungibility ---
     function slip(bytes32 ilk, address usr, int256 wad) external auth {
         gem[ilk][usr] = SafeMath.add(gem[ilk][usr], wad);
     }
@@ -1749,7 +1595,7 @@ contract Vat is Auth {
     }
 }
 
-contract Vow is Auth {
+contract Vow is BASE {
     using SafeMath for uint;
     VatLike public vat;        // CDP Engine
     FlapLike public flapper;   // Surplus Auction House
@@ -1765,15 +1611,13 @@ contract Vow is Auth {
 
     uint public bump;  // Flap fixed lot size    [rad]
     uint public hump;  // Surplus buffer         [rad]
-    uint public live; 
+    uint public live = 1; 
 
     constructor(address vat_, address flapper_, address flopper_) {
-        wards[msg.sender] = 1;
         vat     = VatLike(vat_);
         flapper = FlapLike(flapper_);
         flopper = FlopLike(flopper_);
         vat.hope(flapper_);
-        live = 1;
     }
 
     function file(bytes32 what, uint data) external auth {
@@ -1901,7 +1745,6 @@ library SafeMath {
     uint constant RAY = 10 ** 27;
     uint constant BLN = 10 **  9;
     uint constant WAD = 10 ** 18;
-
     function rmul(uint x, uint y) internal pure returns (uint z) {
         z = x * y;
         require(y == 0 || z / y == x);
